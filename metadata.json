@@ -1,0 +1,6 @@
+{
+  "name": "Mente Viva",
+  "description": "Modern system to read, organize, and edit quotes integrated simply with Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
