@@ -116,7 +116,7 @@ export const ExplorarTab: React.FC<ExplorarTabProps> = ({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Pesquisar por palavras nas frases ou nas notas..."
-            className="w-full bg-black/40 text-white text-sm pl-12 pr-4 py-3 border border-white/10 rounded-2xl focus:outline-none focus:border-white/20 backdrop-blur-md placeholder:text-white/30"
+            className="w-full bg-black/40 text-white text-sm pl-12 pr-4 py-3 border border-white/40 rounded-2xl focus:outline-none focus:border-white backdrop-blur-md placeholder:text-white/30"
           />
         </div>
 

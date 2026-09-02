@@ -6,6 +6,12 @@ export interface Quote {
   tipo: 'Frase' | 'Imagem';
   imagem: string;
   notas: string;
+  // When this item is a pass-through adapter of a SpecialQuote (marked with
+  // the "Também é Conhecimento" tag), this holds the real id/topico in the
+  // Special sheet so opening/editing/favoriting routes back to that row
+  // instead of the Conhecimentos sheet.
+  __specialSourceId?: number;
+  __specialSourceTopico?: string;
 }
 
 export interface SpecialQuote {

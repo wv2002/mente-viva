@@ -54,7 +54,7 @@ export const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     setTipo(quote.tipo);
     setImagem(quote.imagem);
     setQuoteCategories({ ...quote.categories });
-    setEditMode(false);
+    setEditMode(quote.id === 0);
   }, [quote]);
 
   // Handle Share as Text

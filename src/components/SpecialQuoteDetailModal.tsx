@@ -56,7 +56,7 @@ export const SpecialQuoteDetailModal: React.FC<SpecialQuoteDetailModalProps> = (
     setImagem(quote.imagem);
     setTopico(quote.topico);
     setQuoteCategories({ ...quote.categories });
-    setEditMode(false);
+    setEditMode(quote.id === 0);
   }, [quote]);
 
   // Handle Share as Text
@@ -459,7 +459,9 @@ export const SpecialQuoteDetailModal: React.FC<SpecialQuoteDetailModalProps> = (
 
                   {metadata ? (
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                      {metadata.categories.map(cat => {
+                      {metadata.categories
+                        .filter(cat => cat !== 'Também é Conhecimento' || topico === 'Expressões')
+                        .map(cat => {
                         const isChecked = quoteCategories[cat] || false;
                         const isFavorito = cat === 'Favorito' || cat === 'Favoritos';
                         return (

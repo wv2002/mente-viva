@@ -64,7 +64,7 @@ export const EspecialTab: React.FC<EspecialTabProps> = ({
   // Topic selection
   const [activeTopic, setActiveTopic] = useState<TopicType>('Expressões');
   // Sub tab selection
-  const [activeSubTab, setActiveSubTab] = useState<'hoje' | 'explorar' | 'favoritos'>('hoje');
+  const [activeSubTab, setActiveSubTab] = useState<'hoje' | 'explorar' | 'favoritos'>('explorar');
 
   // Search and Category filter state for Explorar (Todos)
   const [searchQuery, setSearchQuery] = useState('');
@@ -98,7 +98,7 @@ export const EspecialTab: React.FC<EspecialTabProps> = ({
   useEffect(() => {
     setSearchQuery('');
     setSelectedCats({});
-    setActiveSubTab('hoje');
+    setActiveSubTab('explorar');
   }, [activeTopic]);
 
   // Determine standard categories from metadata
@@ -327,7 +327,7 @@ export const EspecialTab: React.FC<EspecialTabProps> = ({
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder={`Pesquisar em frases, significados ou notas de ${activeTopic}...`}
-                  className="w-full bg-black/40 text-white pl-10 pr-4 py-3 border border-white/10 rounded-xl focus:outline-none focus:border-white/20 text-sm font-sans"
+                  className="w-full bg-black/40 text-white pl-10 pr-4 py-3 border border-white/40 rounded-xl focus:outline-none focus:border-white text-sm font-sans"
                 />
               </div>
 

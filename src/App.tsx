@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Navbar } from './components/Navbar';
 import { HojeTab } from './components/HojeTab';
 import { ExplorarTab } from './components/ExplorarTab';
@@ -31,6 +31,26 @@ import { User } from 'firebase/auth';
 const SPREADSHEET_ID_KEY = 'mente-viva-spreadsheet-id';
 const DEFAULT_SPREADSHEET_ID = '1N5CNGICJECRdDA8nLuqwTsIDiPBtAc1pmPDaULcOzGU'; // TESTE: "Mente Viva - Claude" (cópia). Trocar pelo ID original antes de ir para produção definitiva.
 
+// Tag usada na planilha Especial para marcar um item como também pertencente
+// à sessão de Conhecimentos (Hoje/Explorar/Favoritos). Não duplicamos a
+// frase: ela continua vivendo só na linha da planilha Especial; aqui só
+// convertemos essa mesma linha num objeto "Quote" para exibição/mistura.
+const KNOWLEDGE_LINK_CATEGORY = 'Também é Conhecimento';
+// Offset grande para não colidir com IDs reais da planilha de Conhecimentos.
+const SPECIAL_ID_OFFSET = 1_000_000;
+
+const specialQuoteToLinkedQuote = (sq: SpecialQuote): Quote => ({
+  id: sq.id + SPECIAL_ID_OFFSET,
+  rowIdx: sq.rowIdx,
+  frase: sq.frase,
+  categories: sq.categories,
+  tipo: sq.tipo,
+  imagem: sq.imagem,
+  notas: sq.notas,
+  __specialSourceId: sq.id,
+  __specialSourceTopico: sq.topico,
+});
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -57,6 +77,47 @@ export default function App() {
   const [activePool, setActivePool] = useState<Quote[]>([]);
   const [activeSpecialPool, setActiveSpecialPool] = useState<SpecialQuote[]>([]);
 
+  // Itens da planilha Especial marcados com KNOWLEDGE_LINK_CATEGORY, convertidos
+  // para o formato Quote e misturados às frases normais no Hoje/Explorar/Favoritos.
+  const linkedKnowledgeQuotes = useMemo(
+    () =>
+      specialQuotes
+        .filter((q) => q.topico === 'Expressões' && q.categories[KNOWLEDGE_LINK_CATEGORY])
+        .map(specialQuoteToLinkedQuote),
+    [specialQuotes]
+  );
+
+  const combinedQuotes = useMemo(
+    () => [...quotes, ...linkedKnowledgeQuotes],
+    [quotes, linkedKnowledgeQuotes]
+  );
+
+  // Se o item clicado/sorteado for um "link" para a planilha Especial, abre o
+  // modal Especial (fonte real do dado) em vez do modal normal de Conhecimentos.
+  const openQuoteOrLinked = (item: Quote) => {
+    if (item.__specialSourceId !== undefined) {
+      const realSpecialQuote = specialQuotes.find((sq) => sq.id === item.__specialSourceId);
+      if (realSpecialQuote) {
+        setSelectedQuote(null);
+        setSelectedSpecialQuote(realSpecialQuote);
+        return;
+      }
+    }
+    setSelectedQuote(item);
+  };
+
+  // Idem para o toggle rápido de favorito nos cards.
+  const toggleFavoriteOrLinked = (item: Quote) => {
+    if (item.__specialSourceId !== undefined) {
+      const realSpecialQuote = specialQuotes.find((sq) => sq.id === item.__specialSourceId);
+      if (realSpecialQuote) {
+        handleToggleSpecialFavorite(realSpecialQuote);
+        return;
+      }
+    }
+    handleToggleFavorite(item);
+  };
+
   // Pick random quote from currently active tab's pool
   const handlePickRandomFromPool = () => {
     if (activePool.length === 0) return;
@@ -77,7 +138,7 @@ export default function App() {
     if (finalCandidates.length === 0) return;
 
     const nextQuote = finalCandidates[Math.floor(Math.random() * finalCandidates.length)];
-    setSelectedQuote(nextQuote);
+    openQuoteOrLinked(nextQuote);
   };
 
   // Touch Swiping detection on mobile/tablet devices
@@ -377,7 +438,7 @@ export default function App() {
     if (customPool) {
       setActivePool(customPool);
     }
-    setSelectedQuote(quote);
+    openQuoteOrLinked(quote);
   };
 
   const handleOpenSpecialQuote = (quote: SpecialQuote, customPool?: SpecialQuote[]) => {
@@ -392,7 +453,7 @@ export default function App() {
     const index = activePool.findIndex((q) => q.id === selectedQuote.id);
     if (index !== -1) {
       const prevIndex = (index - 1 + activePool.length) % activePool.length;
-      setSelectedQuote(activePool[prevIndex]);
+      openQuoteOrLinked(activePool[prevIndex]);
     }
   };
 
@@ -401,7 +462,7 @@ export default function App() {
     const index = activePool.findIndex((q) => q.id === selectedQuote.id);
     if (index !== -1) {
       const nextIndex = (index + 1) % activePool.length;
-      setSelectedQuote(activePool[nextIndex]);
+      openQuoteOrLinked(activePool[nextIndex]);
     }
   };
 
@@ -628,9 +689,9 @@ export default function App() {
               <div className="relative">
                 {activeTab === 'hoje' && (
                   <HojeTab
-                    quotes={quotes}
+                    quotes={combinedQuotes}
                     onOpenQuote={handleOpenQuote}
-                    onToggleFavorite={handleToggleFavorite}
+                    onToggleFavorite={toggleFavoriteOrLinked}
                     isFavoriteLoading={isWriting}
                     onUpdatePool={setActivePool}
                   />
@@ -638,10 +699,10 @@ export default function App() {
 
                 {activeTab === 'explorar' && (
                   <ExplorarTab
-                    quotes={quotes}
+                    quotes={combinedQuotes}
                     metadata={metadata}
                     onOpenQuote={handleOpenQuote}
-                    onToggleFavorite={handleToggleFavorite}
+                    onToggleFavorite={toggleFavoriteOrLinked}
                     isFavoriteLoading={isWriting}
                     onUpdatePool={setActivePool}
                   />
@@ -649,9 +710,9 @@ export default function App() {
 
                 {activeTab === 'favoritos' && (
                   <FavoritosTab
-                    quotes={quotes}
+                    quotes={combinedQuotes}
                     onOpenQuote={handleOpenQuote}
-                    onToggleFavorite={handleToggleFavorite}
+                    onToggleFavorite={toggleFavoriteOrLinked}
                     isFavoriteLoading={isWriting}
                     onUpdatePool={setActivePool}
                   />
