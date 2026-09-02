@@ -327,7 +327,7 @@ export const EspecialTab: React.FC<EspecialTabProps> = ({
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder={`Pesquisar em frases, significados ou notas de ${activeTopic}...`}
-                  className="w-full bg-black/40 text-white pl-10 pr-4 py-3 border border-white/40 rounded-xl focus:outline-none focus:border-white text-sm font-sans"
+                  className="w-full bg-black/40 text-white pl-10 pr-4 py-3 border-2 border-white/40 rounded-xl focus:outline-none focus:border-white text-sm font-sans"
                 />
               </div>
 

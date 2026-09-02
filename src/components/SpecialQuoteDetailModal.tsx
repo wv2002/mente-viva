@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Copy, Download, Plus, Check, Trash2, Edit3, Eye, Sliders, Star, Shuffle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SpecialQuote, SpecialSheetsMetadata } from '../types';
+import { KNOWLEDGE_LINK_CATEGORY } from '../lib/constants';
 
 interface SpecialQuoteDetailModalProps {
   quote: SpecialQuote | null;
@@ -179,6 +180,27 @@ export const SpecialQuoteDetailModal: React.FC<SpecialQuoteDetailModalProps> = (
     }));
   };
 
+  // Estado do vínculo com Conhecimentos e alternância dedicada (cria a coluna
+  // no Sheets na primeira vez que for usada, se ela ainda não existir)
+  const isKnowledgeLinked = quoteCategories[KNOWLEDGE_LINK_CATEGORY] || false;
+  const knowledgeCategoryExists = metadata?.categories.includes(KNOWLEDGE_LINK_CATEGORY) || false;
+
+  const handleToggleKnowledgeLink = async () => {
+    if (isKnowledgeLinked || knowledgeCategoryExists) {
+      handleToggleCategory(KNOWLEDGE_LINK_CATEGORY);
+      return;
+    }
+    setIsCreatingCat(true);
+    try {
+      await onAddNewCategory(KNOWLEDGE_LINK_CATEGORY);
+      setQuoteCategories(prev => ({ ...prev, [KNOWLEDGE_LINK_CATEGORY]: true }));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsCreatingCat(false);
+    }
+  };
+
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = newCatName.trim();
@@ -260,7 +282,7 @@ export const SpecialQuoteDetailModal: React.FC<SpecialQuoteDetailModalProps> = (
           <div className="flex items-center justify-between p-6 border-b border-white/5 bg-neutral-950">
             <div className="flex items-center gap-2">
               <span className="text-[10px] uppercase font-mono tracking-widest px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-full font-bold">
-                Cópia Especial #{quote.id || 'Nova'}
+                Especial #{quote.id || 'Nova'}
               </span>
               <span className="text-[10px] uppercase font-mono tracking-widest px-2.5 py-1 bg-white/5 border border-white/10 text-white/50 rounded-full">
                 {quote.topico}
@@ -460,7 +482,7 @@ export const SpecialQuoteDetailModal: React.FC<SpecialQuoteDetailModalProps> = (
                   {metadata ? (
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                       {metadata.categories
-                        .filter(cat => cat !== 'Também é Conhecimento' || topico === 'Expressões')
+                        .filter(cat => cat !== KNOWLEDGE_LINK_CATEGORY)
                         .map(cat => {
                         const isChecked = quoteCategories[cat] || false;
                         const isFavorito = cat === 'Favorito' || cat === 'Favoritos';
@@ -523,6 +545,28 @@ export const SpecialQuoteDetailModal: React.FC<SpecialQuoteDetailModalProps> = (
                       Add
                     </button>
                   </form>
+
+                  {/* Vínculo dedicado com a sessão de Conhecimentos (só para Expressões) */}
+                  {topico === 'Expressões' && (
+                    <button
+                      type="button"
+                      onClick={handleToggleKnowledgeLink}
+                      disabled={isCreatingCat}
+                      id="btn-toggle-knowledge-link"
+                      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all border mt-2 ${
+                        isKnowledgeLinked
+                          ? 'bg-white/10 border-white/30 text-white'
+                          : 'bg-white/5 border-white/10 text-white/40 hover:text-white/70 hover:border-white/15'
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-all ${
+                        isKnowledgeLinked ? 'bg-white border-transparent' : 'border-white/20'
+                      }`}>
+                        {isKnowledgeLinked && <Check className="w-3.5 h-3.5 text-black stroke-[3]" />}
+                      </div>
+                      Conhecimento também
+                    </button>
+                  )}
                 </div>
 
                 {/* Confirm Edits or Trigger Delete Actions */}
@@ -571,7 +615,7 @@ export const SpecialQuoteDetailModal: React.FC<SpecialQuoteDetailModalProps> = (
                 className="px-5 py-2.5 bg-white/5 text-white/80 hover:text-white border border-white/10 rounded-xl text-xs font-bold duration-200 transition-colors flex items-center gap-2 ml-auto"
               >
                 <Edit3 className="w-3.5 h-3.5" />
-                Editar no Sheets
+                Editar
               </button>
             </div>
           )}

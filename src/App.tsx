@@ -27,15 +27,11 @@ import {
 import { Quote, SheetsMetadata, SpecialQuote, SpecialSheetsMetadata } from './types';
 import { Star, ShieldAlert, CheckCircle2, Sparkles, Loader2, Plus, Info, ExternalLink } from 'lucide-react';
 import { User } from 'firebase/auth';
+import { KNOWLEDGE_LINK_CATEGORY } from './lib/constants';
 
 const SPREADSHEET_ID_KEY = 'mente-viva-spreadsheet-id';
 const DEFAULT_SPREADSHEET_ID = '1N5CNGICJECRdDA8nLuqwTsIDiPBtAc1pmPDaULcOzGU'; // TESTE: "Mente Viva - Claude" (cópia). Trocar pelo ID original antes de ir para produção definitiva.
 
-// Tag usada na planilha Especial para marcar um item como também pertencente
-// à sessão de Conhecimentos (Hoje/Explorar/Favoritos). Não duplicamos a
-// frase: ela continua vivendo só na linha da planilha Especial; aqui só
-// convertemos essa mesma linha num objeto "Quote" para exibição/mistura.
-const KNOWLEDGE_LINK_CATEGORY = 'Também é Conhecimento';
 // Offset grande para não colidir com IDs reais da planilha de Conhecimentos.
 const SPECIAL_ID_OFFSET = 1_000_000;
 
