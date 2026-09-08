@@ -13,7 +13,7 @@ import { QuoteDetailModal } from './components/QuoteDetailModal';
 import { SpecialQuoteDetailModal } from './components/SpecialQuoteDetailModal';
 import { GoogleSignInButton } from './components/GoogleSignInButton';
 import { SettingsModal } from './components/SettingsModal';
-import { initAuth, googleSignIn, logout, setCachedAccessToken, silentTokenRefresh, consumeRedirectResult } from './lib/firebaseAuth';
+import { initAuth, googleSignIn, logout, setCachedAccessToken, silentTokenRefresh } from './lib/firebaseAuth';
 import { 
   getSpreadsheetData, 
   updateQuoteInSpreadsheet, 
@@ -202,30 +202,22 @@ export default function App() {
   // Auth bootstrap on load
   useEffect(() => {
     setIsAuthLoading(true);
-    let unsubscribe: (() => void) | undefined;
+    const unsubscribe = initAuth(
+      (currentUser, activeToken) => {
+        setUser(currentUser);
+        setToken(activeToken);
+        setNeedsAuth(false);
+        setIsAuthLoading(false);
+      },
+      () => {
+        setUser(null);
+        setToken(null);
+        setNeedsAuth(true);
+        setIsAuthLoading(false);
+      }
+    );
 
-    // Pick up the result of a signInWithRedirect() that just completed (if
-    // the user was just sent to Google and came back), THEN start listening
-    // for auth-state changes — this ordering avoids a race where the
-    // listener fires before the redirect token is cached.
-    consumeRedirectResult().finally(() => {
-      unsubscribe = initAuth(
-        (currentUser, activeToken) => {
-          setUser(currentUser);
-          setToken(activeToken);
-          setNeedsAuth(false);
-          setIsAuthLoading(false);
-        },
-        () => {
-          setUser(null);
-          setToken(null);
-          setNeedsAuth(true);
-          setIsAuthLoading(false);
-        }
-      );
-    });
-
-    return () => { if (unsubscribe) unsubscribe(); };
+    return () => unsubscribe();
   }, []);
 
   // Fetch or Synchronize spreadsheet values
@@ -273,12 +265,16 @@ export default function App() {
   const handleLogin = async () => {
     setIsAuthLoading(true);
     try {
-      // Navigates the browser to Google's login page; the app reloads and
-      // picks up the result via consumeRedirectResult() in the effect above.
-      await googleSignIn();
+      const result = await googleSignIn();
+      if (result) {
+        setUser(result.user);
+        setToken(result.accessToken);
+        setNeedsAuth(false);
+      }
     } catch (err: any) {
       console.error('Sign-in failed:', err);
       triggerNotification('error', `Falha ao conectar com o Google: ${err.message || err}`);
+    } finally {
       setIsAuthLoading(false);
     }
   };

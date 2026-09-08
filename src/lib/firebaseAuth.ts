@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
@@ -97,36 +97,26 @@ export const initAuth = (
   });
 };
 
-// Kicks off Google sign-in via full-page redirect (no popup, no extra tab —
-// the browser navigates to Google's login page and comes back to the app
-// automatically once the user authorizes it).
-export const googleSignIn = async (): Promise<void> => {
-  isSigningIn = true;
-  sessionStorage.setItem('mente-viva-signing-in', '1');
-  await signInWithRedirect(auth, provider);
-  // Execution stops here: the browser navigates away. The result is picked
-  // up by consumeRedirectResult() the next time the app loads.
-};
-
-// Call once on app startup, before setting up the auth-state listener, to
-// pick up the result of a signInWithRedirect() that just completed (if any).
-// Safe to call even when there's no pending redirect — resolves to null.
-export const consumeRedirectResult = async (): Promise<{ user: User; accessToken: string } | null> => {
+// Must be called from a button click or user interaction — calling it
+// synchronously in the click handler (no awaited work beforehand) is what
+// keeps browsers from flagging the popup as blocked.
+export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
-    const result = await getRedirectResult(auth);
-    if (!result) return null;
+    isSigningIn = true;
+    const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) return null;
+    if (!credential?.accessToken) {
+      throw new Error('Failed to get access token from Firebase Auth');
+    }
 
     cachedAccessToken = credential.accessToken;
     localStorage.setItem(GOOGLE_ACCESS_TOKEN_KEY, cachedAccessToken);
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
-    console.error('Redirect sign-in error:', error);
-    return null;
+    console.error('Sign in error:', error);
+    throw error;
   } finally {
     isSigningIn = false;
-    sessionStorage.removeItem('mente-viva-signing-in');
   }
 };
 
