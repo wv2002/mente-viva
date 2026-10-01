@@ -1,4 +1,33 @@
 import { Quote, SheetsMetadata, SpecialQuote, SpecialSheetsMetadata } from '../types';
+import { getValidToken, silentTokenRefresh } from './firebaseAuth';
+
+/**
+ * fetch para a API do Sheets com renovação automática do token:
+ *  - sempre usa o token mais recente válido (mesmo que o app tenha um antigo);
+ *  - se receber 401, tenta renovar uma vez e repete a chamada;
+ *  - se continuar 401, lança TOKEN_EXPIRED (o app trata isso).
+ */
+async function sheetsFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const baseHeaders = (init.headers || {}) as Record<string, string>;
+  const originalToken = (baseHeaders['Authorization'] || '').replace('Bearer ', '');
+  const current = getValidToken() || originalToken;
+
+  const send = (token: string) =>
+    fetch(url, { ...init, headers: { ...baseHeaders, Authorization: `Bearer ${token}` } });
+
+  let resp = await send(current);
+  if (resp.status === 401) {
+    const latest = getValidToken();
+    const renewed = latest && latest !== current ? latest : await silentTokenRefresh();
+    if (renewed && renewed !== current) {
+      resp = await send(renewed);
+    }
+  }
+  if (resp.status === 401) {
+    throw new Error('TOKEN_EXPIRED');
+  }
+  return resp;
+}
 
 /**
  * Converts a 0-based column index to its Excel letter representation (e.g., 0 -> 'A', 25 -> 'Z', 26 -> 'AA')
@@ -18,7 +47,7 @@ export function getColLetter(index: number): string {
  */
 export async function fetchSpreadsheetMetadata(spreadsheetId: string, accessToken: string): Promise<{ sheetId: number; sheetName: string }> {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
-  const response = await fetch(url, {
+  const response = await sheetsFetch(url, {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
@@ -60,7 +89,7 @@ export async function getSpreadsheetData(
   // 2. Read cell values from row 1 to 5000 (adjust as needed)
   const range = `'${sheetName}'!A1:Z10000`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
-  const response = await fetch(url, {
+  const response = await sheetsFetch(url, {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
     },
@@ -227,7 +256,7 @@ export async function updateQuoteInSpreadsheet(
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
 
-  const response = await fetch(url, {
+  const response = await sheetsFetch(url, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -292,7 +321,7 @@ export async function addQuoteToSpreadsheet(
   const range = `'${sheetName}'!A:A`; // Appends at the end
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
 
-  const response = await fetch(url, {
+  const response = await sheetsFetch(url, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -361,7 +390,7 @@ export async function addCategoryColumn(
     ],
   };
 
-  const insertResponse = await fetch(batchUrl, {
+  const insertResponse = await sheetsFetch(batchUrl, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -380,7 +409,7 @@ export async function addCategoryColumn(
   const cellRange = `'${sheetName}'!${newColLetter}1`;
   const setHeaderUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(cellRange)}?valueInputOption=USER_ENTERED`;
 
-  const setHeaderResponse = await fetch(setHeaderUrl, {
+  const setHeaderResponse = await sheetsFetch(setHeaderUrl, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -429,7 +458,7 @@ export async function getSpecialSpreadsheetData(
 ): Promise<{ quotes: SpecialQuote[]; metadata: SpecialSheetsMetadata }> {
   // 1. Fetch spreadsheet to list all sheets
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
-  const response = await fetch(url, {
+  const response = await sheetsFetch(url, {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
@@ -466,7 +495,7 @@ export async function getSpecialSpreadsheetData(
       ],
     };
 
-    const createResp = await fetch(createUrl, {
+    const createResp = await sheetsFetch(createUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -501,7 +530,7 @@ export async function getSpecialSpreadsheetData(
     ];
 
     const seedUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(seedRange)}?valueInputOption=USER_ENTERED`;
-    const seedResp = await fetch(seedUrl, {
+    const seedResp = await sheetsFetch(seedUrl, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -523,7 +552,7 @@ export async function getSpecialSpreadsheetData(
   // 3. Read cell values from row 1 to 10000 from 'Especial'
   const range = `'${sheetName}'!A1:Z10000`;
   const valuesUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
-  const valuesResp = await fetch(valuesUrl, {
+  const valuesResp = await sheetsFetch(valuesUrl, {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
     },
@@ -679,7 +708,7 @@ export async function updateSpecialQuoteInSpreadsheet(
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
 
-  const response = await fetch(url, {
+  const response = await sheetsFetch(url, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -746,7 +775,7 @@ export async function addSpecialQuoteToSpreadsheet(
   const range = `'${sheetName}'!A:A`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
 
-  const response = await fetch(url, {
+  const response = await sheetsFetch(url, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -812,7 +841,7 @@ export async function addSpecialCategoryColumn(
     ],
   };
 
-  const insertResponse = await fetch(batchUrl, {
+  const insertResponse = await sheetsFetch(batchUrl, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -830,7 +859,7 @@ export async function addSpecialCategoryColumn(
   const cellRange = `'${sheetName}'!${newColLetter}1`;
   const setHeaderUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(cellRange)}?valueInputOption=USER_ENTERED`;
 
-  const setHeaderResponse = await fetch(setHeaderUrl, {
+  const setHeaderResponse = await sheetsFetch(setHeaderUrl, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
