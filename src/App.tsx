@@ -13,7 +13,7 @@ import { QuoteDetailModal } from './components/QuoteDetailModal';
 import { SpecialQuoteDetailModal } from './components/SpecialQuoteDetailModal';
 import { GoogleSignInButton } from './components/GoogleSignInButton';
 import { SettingsModal } from './components/SettingsModal';
-import { initAuth, googleSignIn, logout, setCachedAccessToken, silentTokenRefresh } from './lib/firebaseAuth';
+import { initAuth, googleSignIn, logout, invalidateToken } from './lib/firebaseAuth';
 import { 
   getSpreadsheetData, 
   updateQuoteInSpreadsheet, 
@@ -34,6 +34,12 @@ const DEFAULT_SPREADSHEET_ID = '1N5CNGICJECRdDA8nLuqwTsIDiPBtAc1pmPDaULcOzGU'; /
 
 // Offset grande para não colidir com IDs reais da planilha de Conhecimentos.
 const SPECIAL_ID_OFFSET = 1_000_000;
+
+// Texto amigável para erros de gravação (traduz TOKEN_EXPIRED).
+const errText = (err: any): string =>
+  err?.message === 'TOKEN_EXPIRED'
+    ? 'sua conexão com o Google expirou. Clique em ↻ (sincronizar) para renovar e tente de novo'
+    : err?.message;
 
 const specialQuoteToLinkedQuote = (sq: SpecialQuote): Quote => ({
   id: sq.id + SPECIAL_ID_OFFSET,
@@ -209,11 +215,14 @@ export default function App() {
         setNeedsAuth(false);
         setIsAuthLoading(false);
       },
-      () => {
+      (reason) => {
         setUser(null);
         setToken(null);
         setNeedsAuth(true);
         setIsAuthLoading(false);
+        if (reason === 'expired') {
+          triggerNotification('error', 'Sua conexão com o Google expirou. Clique em "Entrar com o Google" para reconectar.');
+        }
       }
     );
 
@@ -238,14 +247,12 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       if (err.message === 'TOKEN_EXPIRED') {
-        const refreshedToken = await silentTokenRefresh();
-        if (refreshedToken) {
-          setToken(refreshedToken);
-          // synchronizeData will be re-triggered by the token change (see useEffect below)
-        } else {
-          handleLogout();
-          triggerNotification('error', 'Sua conexão com o Google expirou. Conecte-se novamente.');
-        }
+        // A renovação automática já foi tentada em sheetsService. Sem loops:
+        // pedimos um clique em "Entrar com o Google".
+        invalidateToken();
+        setToken(null);
+        setNeedsAuth(true);
+        triggerNotification('error', 'Sua conexão com o Google expirou. Clique em "Entrar com o Google" para reconectar.');
       } else {
         triggerNotification('error', `Falha ao carregar dados: ${err.message || err}`);
       }
@@ -333,7 +340,7 @@ export default function App() {
       if (selectedQuote?.id === quote.id) {
         setSelectedQuote(quote);
       }
-      triggerNotification('error', `Falha ao gravar favorito no Sheets: ${err.message}`);
+      triggerNotification('error', `Falha ao gravar favorito no Sheets: ${errText(err)}`);
     }
   };
 
@@ -360,7 +367,7 @@ export default function App() {
       }
     } catch (err: any) {
       console.error(err);
-      triggerNotification('error', `Falha ao gravar no Sheets: ${err.message}`);
+      triggerNotification('error', `Falha ao gravar no Sheets: ${errText(err)}`);
     } finally {
       setIsWriting(false);
     }
@@ -404,7 +411,7 @@ export default function App() {
       triggerNotification('success', `Categoria "${cleanName}" adicionada no Google Sheets!`);
     } catch (err: any) {
       console.error(err);
-      triggerNotification('error', `Falha ao criar nova categoria: ${err.message}`);
+      triggerNotification('error', `Falha ao criar nova categoria: ${errText(err)}`);
       throw err;
     } finally {
       setIsWriting(false);
@@ -515,7 +522,7 @@ export default function App() {
       if (selectedSpecialQuote?.id === quote.id) {
         setSelectedSpecialQuote(quote);
       }
-      triggerNotification('error', `Falha ao gravar favorito especial: ${err.message}`);
+      triggerNotification('error', `Falha ao gravar favorito especial: ${errText(err)}`);
     }
   };
 
@@ -544,7 +551,7 @@ export default function App() {
       }
     } catch (err: any) {
       console.error(err);
-      triggerNotification('error', `Falha ao gravar item especial: ${err.message}`);
+      triggerNotification('error', `Falha ao gravar item especial: ${errText(err)}`);
     } finally {
       setIsWriting(false);
     }
@@ -583,7 +590,7 @@ export default function App() {
       triggerNotification('success', `Categoria "${cleanName}" adicionada no Sheets Especial!`);
     } catch (err: any) {
       console.error(err);
-      triggerNotification('error', `Falha ao adicionar categoria especial: ${err.message}`);
+      triggerNotification('error', `Falha ao adicionar categoria especial: ${errText(err)}`);
       throw err;
     } finally {
       setIsWriting(false);
