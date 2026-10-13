@@ -3,9 +3,9 @@ import { getValidToken, silentTokenRefresh } from './firebaseAuth';
 
 /**
  * fetch para a API do Sheets com renovação automática do token:
- *  - sempre usa o token mais recente válido (mesmo que o app tenha um antigo);
+ *  - sempre usa o token mais recente válido;
  *  - se receber 401, tenta renovar uma vez e repete a chamada;
- *  - se continuar 401, lança TOKEN_EXPIRED (o app trata isso).
+ *  - se continuar 401, lança TOKEN_EXPIRED.
  */
 async function sheetsFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const baseHeaders = (init.headers || {}) as Record<string, string>;
@@ -27,6 +27,86 @@ async function sheetsFetch(url: string, init: RequestInit = {}): Promise<Respons
     throw new Error('TOKEN_EXPIRED');
   }
   return resp;
+}
+
+/**
+ * PROTEÇÃO CONTRA SOBRESCRITA.
+ * O "append" do Google Sheets se baseia na "Tabela_1" da planilha e podia gravar
+ * em cima de linhas existentes. Aqui lemos a coluna do ID e decidimos nós mesmos
+ * a linha exata: logo depois da última linha com ID. Antes de gravar, conferimos
+ * que a linha de destino está totalmente vazia.
+ */
+async function findNextFreeRow(
+  spreadsheetId: string,
+  sheetName: string,
+  idColIdx: number,
+  lastColIdx: number,
+  accessToken: string
+): Promise<{ row: number; maxId: number }> {
+  const idLetter = getColLetter(idColIdx);
+  const colRange = `'${sheetName}'!${idLetter}1:${idLetter}20000`;
+  const colUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(colRange)}`;
+  const colResp = await sheetsFetch(colUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!colResp.ok) {
+    throw new Error(`Falha ao ler a coluna de IDs. Status: ${colResp.status}`);
+  }
+  const colData = await colResp.json();
+  const values: string[][] = colData.values || [];
+
+  let lastRow = 1; // cabeçalho
+  let maxId = 0;
+  for (let i = 1; i < values.length; i++) {
+    const cell = (values[i] && values[i][0] ? String(values[i][0]) : '').trim();
+    if (cell !== '') {
+      lastRow = i + 1;
+      const n = parseInt(cell, 10);
+      if (!isNaN(n) && n > maxId) maxId = n;
+    }
+  }
+  const target = lastRow + 1;
+
+  // Confere que a linha inteira de destino está vazia
+  const rowRange = `'${sheetName}'!A${target}:${getColLetter(lastColIdx)}${target}`;
+  const rowUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(rowRange)}`;
+  const rowResp = await sheetsFetch(rowUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!rowResp.ok) {
+    throw new Error(`Falha ao verificar a linha de destino. Status: ${rowResp.status}`);
+  }
+  const rowData = await rowResp.json();
+  const rowVals: string[] = (rowData.values && rowData.values[0]) || [];
+  if (rowVals.some((c) => String(c).trim() !== '')) {
+    throw new Error(`GRAVACAO_BLOQUEADA: a linha ${target} da planilha já tem conteúdo. Nada foi gravado.`);
+  }
+  return { row: target, maxId };
+}
+
+/**
+ * Antes de editar uma linha, confere que o ID que está na planilha é mesmo o do
+ * item editado. Se a planilha mudou (outro aparelho, edição manual), bloqueia
+ * em vez de sobrescrever a linha errada.
+ */
+async function assertRowMatches(
+  spreadsheetId: string,
+  sheetName: string,
+  idColIdx: number,
+  rowNum: number,
+  expectedId: number,
+  accessToken: string
+): Promise<void> {
+  const idLetter = getColLetter(idColIdx);
+  const range = `'${sheetName}'!${idLetter}${rowNum}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+  const resp = await sheetsFetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) {
+    throw new Error(`Falha ao verificar a linha antes de gravar. Status: ${resp.status}`);
+  }
+  const data = await resp.json();
+  const found = data.values && data.values[0] ? String(data.values[0][0]).trim() : '';
+  if (found !== String(expectedId)) {
+    throw new Error(
+      `GRAVACAO_BLOQUEADA: a linha ${rowNum} da planilha não é mais o item #${expectedId}. Clique em sincronizar (↻) e tente de novo. Nada foi gravado.`
+    );
+  }
 }
 
 /**
@@ -254,6 +334,8 @@ export async function updateQuoteInSpreadsheet(
   const endLetter = getColLetter(headers.length - 1);
   const range = `'${sheetName}'!${startLetter}${rowNum}:${endLetter}${rowNum}`;
 
+  await assertRowMatches(spreadsheetId, sheetName, columns['ID'] !== undefined ? columns['ID'] : 0, rowNum, quote.id, accessToken);
+
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
 
   const response = await sheetsFetch(url, {
@@ -318,16 +400,24 @@ export async function addQuoteToSpreadsheet(
     newRowValues[notasIdx] = newQuoteData.notas;
   }
 
-  const range = `'${sheetName}'!A:A`; // Appends at the end
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
+  const idColIdx = columns['ID'] !== undefined ? columns['ID'] : 0;
+  const { row: targetRow, maxId } = await findNextFreeRow(spreadsheetId, sheetName, idColIdx, headers.length - 1, accessToken);
+  // Garante ID único mesmo se este aparelho estiver desatualizado
+  const finalId = Math.max(nextId, maxId + 1);
+  newRowValues[idColIdx] = String(finalId);
+
+  const range = `'${sheetName}'!A${targetRow}:${getColLetter(headers.length - 1)}${targetRow}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
 
   const response = await sheetsFetch(url, {
-    method: 'POST',
+    method: 'PUT',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
+      range,
+      majorDimension: 'ROWS',
       values: [newRowValues],
     }),
   });
@@ -337,14 +427,10 @@ export async function addQuoteToSpreadsheet(
     throw new Error(`Failed to append new quote. Status: ${response.status}. Error: ${errText}`);
   }
 
-  const data = await response.json();
-  // Extract inserted row number from response range e.g. "Sheet1!A15:S15"
-  const updatedRange = data.updates.updatedRange;
-  const match = updatedRange.match(/A(\d+):/);
-  const rowIdx = match ? parseInt(match[1], 10) : nextId + 1; // fallback prediction
+  const rowIdx = targetRow;
 
   return {
-    id: nextId,
+    id: finalId,
     rowIdx,
     frase: newQuoteData.frase,
     categories: newQuoteData.categories,
@@ -706,6 +792,8 @@ export async function updateSpecialQuoteInSpreadsheet(
   const endLetter = getColLetter(headers.length - 1);
   const range = `'${sheetName}'!${startLetter}${rowNum}:${endLetter}${rowNum}`;
 
+  await assertRowMatches(spreadsheetId, sheetName, columns['ID'] !== undefined ? columns['ID'] : 0, rowNum, quote.id, accessToken);
+
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
 
   const response = await sheetsFetch(url, {
@@ -772,16 +860,24 @@ export async function addSpecialQuoteToSpreadsheet(
     newRowValues[notasIdx] = newQuoteData.notas;
   }
 
-  const range = `'${sheetName}'!A:A`;
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
+  const idColIdx = columns['ID'] !== undefined ? columns['ID'] : 0;
+  const { row: targetRow, maxId } = await findNextFreeRow(spreadsheetId, sheetName, idColIdx, headers.length - 1, accessToken);
+  // Garante ID único mesmo se este aparelho estiver desatualizado
+  const finalId = Math.max(nextId, maxId + 1);
+  newRowValues[idColIdx] = String(finalId);
+
+  const range = `'${sheetName}'!A${targetRow}:${getColLetter(headers.length - 1)}${targetRow}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
 
   const response = await sheetsFetch(url, {
-    method: 'POST',
+    method: 'PUT',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
+      range,
+      majorDimension: 'ROWS',
       values: [newRowValues],
     }),
   });
@@ -791,13 +887,10 @@ export async function addSpecialQuoteToSpreadsheet(
     throw new Error(`Failed to append special quote. Status: ${response.status}. Error: ${errText}`);
   }
 
-  const data = await response.json();
-  const updatedRange = data.updates.updatedRange;
-  const match = updatedRange.match(/A(\d+):/);
-  const rowIdx = match ? parseInt(match[1], 10) : nextId + 1;
+  const rowIdx = targetRow;
 
   return {
-    id: nextId,
+    id: finalId,
     rowIdx,
     frase: newQuoteData.frase,
     topico: newQuoteData.topico,
