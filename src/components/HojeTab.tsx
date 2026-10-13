@@ -29,6 +29,18 @@ const deterministicShuffle = <T,>(array: T[], rng: () => number): T[] => {
   return arr;
 };
 
+// Sorteio estável entre aparelhos: cada frase recebe uma "nota" fixa calculada
+// a partir da data + id da frase, e as N de menor nota são as escolhidas.
+// Assim, dois aparelhos com a mesma planilha sempre mostram as mesmas frases, e
+// adicionar/alterar uma frase só muda o resultado se ela própria for sorteada.
+const rankPick = (list: Quote[], todayStr: string, salt: string, n: number): Quote[] => {
+  return list
+    .map((q) => ({ q, score: seedRandom(`${todayStr}-${salt}-${q.id}`)() }))
+    .sort((a, b) => a.score - b.score || a.q.id - b.q.id)
+    .slice(0, n)
+    .map((x) => x.q);
+};
+
 interface HojeTabProps {
   quotes: Quote[];
   onOpenQuote: (quote: Quote, pool?: Quote[]) => void;
@@ -112,96 +124,45 @@ export const HojeTab: React.FC<HojeTabProps> = ({
     return `${weekdays[d.getDay()]}, ${d.getDate()} DE ${months[d.getMonth()].toUpperCase()}`;
   };
 
-  // Draw or restore daily 5 quotes and daily secrets
+  // Sorteio do dia: calculado a partir da planilha (igual em todos os aparelhos).
+  // Só é "congelado" neste aparelho se você usar o botão de sortear de novo.
   useEffect(() => {
     if (quotes.length === 0) return;
 
     const todayStr = getTodayStr();
-    const savedSeedJson = localStorage.getItem('mente-viva-daily-seed');
-    let seedData: { date: string; standardIds: number[]; secretIds: number[]; treinarIds?: number[] } | null = null;
-    
-    if (savedSeedJson) {
-      try {
-        seedData = JSON.parse(savedSeedJson);
-      } catch (e) {
-        seedData = null;
-      }
-    }
 
     // Standard quotes (where Privado and Treinar are false)
     const publicQuotes = quotes.filter((q) => !q.categories['Privado'] && !q.categories['Treinar']);
-    // Secret quotes (where Privado is true)
     const privateQuotes = quotes.filter((q) => q.categories['Privado']);
-    // Treinar quotes (where Treinar is true)
     const treinarQuotes = quotes.filter((q) => q.categories['Treinar']);
 
-    if (
-      seedData &&
-      seedData.date === todayStr &&
-      seedData.standardIds.length > 0 &&
-      seedData.standardIds.every((id) => quotes.some((q) => q.id === id))
-    ) {
-      // Map stored IDs back to active quote objects
-      const restoredStandards = seedData.standardIds
-        .map((id) => quotes.find((q) => q.id === id))
-        .filter(Boolean) as Quote[];
-      
-      const restoredSecrets = seedData.secretIds
-        .map((id) => quotes.find((q) => q.id === id))
-        .filter(Boolean) as Quote[];
-
-      const restoredTreinar = (seedData.treinarIds || [])
-        .map((id) => quotes.find((q) => q.id === id))
-        .filter(Boolean) as Quote[];
-
-      setDailyQuotes(restoredStandards);
-      setDailySecretQuotes(restoredSecrets);
-      setDailyTreinarQuotes(restoredTreinar);
-
-      // Self-heal key if missing in previous seed data format
-      if (!seedData.treinarIds) {
-        const sortedTreinar = [...treinarQuotes].sort((a, b) => a.id - b.id);
-        const rngTrn = seedRandom(todayStr + '-trn');
-        const shuffledTreinar = deterministicShuffle(sortedTreinar, rngTrn);
-        const selectedTreinar = shuffledTreinar.slice(0, treinarCount);
-        setDailyTreinarQuotes(selectedTreinar);
-
-        seedData.treinarIds = selectedTreinar.map((q) => q.id);
-        localStorage.setItem('mente-viva-daily-seed', JSON.stringify(seedData));
+    // Respeita um sorteio manual feito hoje neste aparelho
+    try {
+      const saved = localStorage.getItem('mente-viva-daily-seed');
+      if (saved) {
+        const seed = JSON.parse(saved);
+        if (
+          seed?.manual === true &&
+          seed.date === todayStr &&
+          Array.isArray(seed.standardIds) &&
+          seed.standardIds.length > 0 &&
+          seed.standardIds.every((id: number) => quotes.some((q) => q.id === id))
+        ) {
+          const pick = (ids: number[] = []) =>
+            ids.map((id) => quotes.find((q) => q.id === id)).filter(Boolean) as Quote[];
+          setDailyQuotes(pick(seed.standardIds));
+          setDailySecretQuotes(pick(seed.secretIds));
+          setDailyTreinarQuotes(pick(seed.treinarIds));
+          return;
+        }
       }
-    } else {
-      // Create new stable seeds for the day
-      // 1. Draw 5 random standard quotes using stable deterministic PRNG
-      const sortedPublic = [...publicQuotes].sort((a, b) => a.id - b.id);
-      const rngStd = seedRandom(todayStr + '-std');
-      const shuffledStandards = deterministicShuffle(sortedPublic, rngStd);
-      const selectedStandards = shuffledStandards.slice(0, 5);
-
-      // 2. Draw secretCount random secret quotes using stable deterministic PRNG
-      const sortedPrivate = [...privateQuotes].sort((a, b) => a.id - b.id);
-      const rngSec = seedRandom(todayStr + '-sec');
-      const shuffledSecrets = deterministicShuffle(sortedPrivate, rngSec);
-      const selectedSecrets = shuffledSecrets.slice(0, secretCount);
-
-      // 3. Draw treinarCount random treinar quotes using stable PRNG
-      const sortedTreinar = [...treinarQuotes].sort((a, b) => a.id - b.id);
-      const rngTrn = seedRandom(todayStr + '-trn');
-      const shuffledTreinar = deterministicShuffle(sortedTreinar, rngTrn);
-      const selectedTreinar = shuffledTreinar.slice(0, treinarCount);
-
-      setDailyQuotes(selectedStandards);
-      setDailySecretQuotes(selectedSecrets);
-      setDailyTreinarQuotes(selectedTreinar);
-
-      // Save to localStorage
-      const newSeed = {
-        date: todayStr,
-        standardIds: selectedStandards.map((q) => q.id),
-        secretIds: selectedSecrets.map((q) => q.id),
-        treinarIds: selectedTreinar.map((q) => q.id),
-      };
-      localStorage.setItem('mente-viva-daily-seed', JSON.stringify(newSeed));
+    } catch (e) {
+      // ignore
     }
+
+    setDailyQuotes(rankPick(publicQuotes, todayStr, 'std', 5));
+    setDailySecretQuotes(rankPick(privateQuotes, todayStr, 'sec', secretCount));
+    setDailyTreinarQuotes(rankPick(treinarQuotes, todayStr, 'trn', treinarCount));
   }, [quotes]);
 
   // Adjust secrets when user changes the target Count settings
@@ -214,24 +175,7 @@ export const HojeTab: React.FC<HojeTabProps> = ({
 
     if (quotes.length === 0) return;
     const privateQuotes = quotes.filter((q) => q.categories['Privado']);
-    
-    const sortedPrivate = [...privateQuotes].sort((a, b) => a.id - b.id);
-    const todayStr = getTodayStr();
-    const rngSec = seedRandom(todayStr + '-sec');
-    const shuffledSecrets = deterministicShuffle(sortedPrivate, rngSec);
-    const selectedSecrets = shuffledSecrets.slice(0, newVal);
-    setDailySecretQuotes(selectedSecrets);
-
-    const savedSeedJson = localStorage.getItem('mente-viva-daily-seed');
-    if (savedSeedJson) {
-      try {
-        const seedData = JSON.parse(savedSeedJson);
-        seedData.secretIds = selectedSecrets.map((q) => q.id);
-        localStorage.setItem('mente-viva-daily-seed', JSON.stringify(seedData));
-      } catch (e) {
-        // ignore
-      }
-    }
+    setDailySecretQuotes(rankPick(privateQuotes, getTodayStr(), 'sec', newVal));
   };
 
   // Adjust Treinar session when user changes target count
@@ -244,24 +188,7 @@ export const HojeTab: React.FC<HojeTabProps> = ({
 
     if (quotes.length === 0) return;
     const treinarQuotes = quotes.filter((q) => q.categories['Treinar']);
-
-    const sortedTreinar = [...treinarQuotes].sort((a, b) => a.id - b.id);
-    const todayStr = getTodayStr();
-    const rngTrn = seedRandom(todayStr + '-trn');
-    const shuffledTreinar = deterministicShuffle(sortedTreinar, rngTrn);
-    const selectedTreinar = shuffledTreinar.slice(0, newVal);
-    setDailyTreinarQuotes(selectedTreinar);
-
-    const savedSeedJson = localStorage.getItem('mente-viva-daily-seed');
-    if (savedSeedJson) {
-      try {
-        const seedData = JSON.parse(savedSeedJson);
-        seedData.treinarIds = selectedTreinar.map((q) => q.id);
-        localStorage.setItem('mente-viva-daily-seed', JSON.stringify(seedData));
-      } catch (e) {
-        // ignore
-      }
-    }
+    setDailyTreinarQuotes(rankPick(treinarQuotes, getTodayStr(), 'trn', newVal));
   };
 
   // Re-roll today's selection (if user manually triggers it)
@@ -286,6 +213,7 @@ export const HojeTab: React.FC<HojeTabProps> = ({
 
     const newSeed = {
       date: todayStr,
+      manual: true,
       standardIds: selectedStandards.map((q) => q.id),
       secretIds: selectedSecrets.map((q) => q.id),
       treinarIds: selectedTreinar.map((q) => q.id),
